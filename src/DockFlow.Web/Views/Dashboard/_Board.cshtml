@@ -1,0 +1,72 @@
+@model BoardPage
+@{
+    var manager = Identity.Can(User, Identity.Managers);
+    var visits = Model.Board.Visits.OrderBy(v => !BoardPage.Active(v)).ThenBy(v => v.Start).ToList();
+    var free = Model.Board.Docks.Count(d => Model.DockState(d) == "Livre agora");
+}
+<div class="section-title"><div><p class="eyebrow">01 / DISPONIBILIDADE</p><h2>Docas</h2></div><p>@free livre(s) de @Model.Board.Docks.Count · @Model.Now.ToString("HH:mm:ss") UTC</p></div>
+<p class="muted">@Model.CompletedToday descarga(s) concluída(s) hoje · UTC · indicador pode atrasar até 15 s</p>
+@if (Model.Board.Docks.Count == 0) { <p class="panel empty">Nenhuma doca cadastrada.</p> }
+<div class="dock-grid">
+@foreach (var dock in Model.Board.Docks.OrderBy(d => d.Code))
+{
+    var state = Model.DockState(dock);
+    var badge = !dock.Operational ? "blocked" : state == "Livre agora" ? "free" : "occupied";
+    var next = visits.FirstOrDefault(v => v.DockId == dock.Id && BoardPage.Active(v) && v.Start > Model.Now);
+    <article class="panel dock">
+        <div class="dock-title"><h3>@dock.Code</h3><span class="pill @badge">@state</span></div>
+        <p>@BoardPage.CargoLabel(dock.Cargo) · até @dock.MaxWeightKg.ToString("N0") kg</p>
+        <p class="muted">@(next is null ? "Sem próxima reserva no painel" : $"Próxima reserva: {BoardPage.Stamp(next.Start)} UTC")</p>
+        @if (manager && dock.Operational)
+        {
+            <details data-pause-refresh><summary>Bloquear doca</summary>
+                <form method="post" asp-action="Block" asp-route-id="@dock.Id" class="block-form">
+                    <label>Motivo<input name="reason" maxlength="200" required /></label><button type="submit">Bloquear</button>
+                </form>
+            </details>
+        }
+    </article>
+}
+</div>
+<section aria-labelledby="visitas">
+<div class="section-title"><div><p class="eyebrow">02 / FLUXO DE VEÍCULOS</p><h2 id="visitas">Fila e agenda</h2></div><p>@visits.Count(v => v.Status == VisitStatus.CheckedIn) aguardando alocação · horários UTC</p></div>
+@if (visits.Count == 0) { <p class="panel empty">Nenhuma visita encontrada.</p> }
+else
+{
+<div class="panel scroll" tabindex="0" aria-label="Tabela de visitas">
+<table><thead><tr><th scope="col">Veículo</th><th scope="col">Doca</th><th scope="col">Janela (UTC)</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>
+@foreach (var v in visits)
+{
+    <tr><th scope="row">@v.Vehicle <small>@BoardPage.CargoLabel(v.Cargo) · @v.WeightKg.ToString("N0") kg</small></th>
+    <td>@v.DockCode</td><td>@BoardPage.Stamp(v.Start) → @BoardPage.Stamp(v.End)</td><td><span class="pill">@BoardPage.StatusLabel(v.Status)</span></td>
+    <td><div class="actions">
+    @foreach (var item in BoardPage.Actions(v.Status).Where(item => Identity.Can(User, BoardPage.Roles(item.Action)) && (item.Action != VisitAction.NoShow || v.End <= Model.Now)))
+    {
+        <form method="post" asp-action="Move" asp-route-id="@v.Id">
+            <input type="hidden" name="version" value="@v.Version" /><button name="action" value="@item.Action" type="submit">@item.Label</button>
+        </form>
+    }
+    @if (manager && v.Status is (VisitStatus.Scheduled or VisitStatus.CheckedIn))
+    {
+        <form method="post" asp-action="Reassign" asp-route-id="@v.Id">
+            <input type="hidden" name="version" value="@v.Version" /><button type="submit">Realocar</button>
+        </form>
+    }
+    </div></td></tr>
+}
+</tbody></table></div>
+}
+</section>
+<section aria-labelledby="incidentes">
+<div class="section-title"><div><p class="eyebrow">03 / EXCEÇÕES</p><h2 id="incidentes">Incidentes</h2></div><p>@Model.Board.Incidents.Count registro(s)</p></div>
+@if (Model.Board.Incidents.Count == 0) { <p class="panel empty">Nenhum incidente registrado.</p> }
+else
+{
+    <ul class="panel incidents">
+    @foreach (var item in Model.Board.Incidents.OrderByDescending(i => i.DetectedAt))
+    {
+        <li><strong>@item.Kind</strong><span>Doca @(Model.Board.Docks.FirstOrDefault(d => d.Id == item.DockId)?.Code ?? "—") · @BoardPage.Stamp(item.DetectedAt) UTC</span><span class="pill">@item.Status</span></li>
+    }
+    </ul>
+}
+</section>

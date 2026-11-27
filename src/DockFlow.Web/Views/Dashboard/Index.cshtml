@@ -1,0 +1,29 @@
+@model BoardPage
+@{ ViewData["Title"] = "Painel de operações"; }
+<section class="hero">
+    <div><p class="eyebrow">CENTRAL DE OPERAÇÕES / PÁTIO</p><h1>Painel de docas</h1><p>Acompanhe a disponibilidade, a fila de visitas e os incidentes.</p></div>
+    <div class="hero-controls"><span id="connection-status" role="status" class="pill">Atualização periódica</span><a href="/" class="quiet">Recarregar</a></div>
+</section>
+@if (TempData["success"] is string success) { <p class="notice" role="status">@success</p> }
+@if (TempData["error"] is string error) { <p class="notice error" role="alert">@error</p> }
+@if (Identity.Can(User, Identity.Managers))
+{
+    <details class="panel booking" data-pause-refresh><summary>Novo agendamento</summary>
+        <form method="post" asp-action="Schedule" class="booking-form">
+            <input type="hidden" name="requestKey" value="@Guid.NewGuid()" />
+            <label>Identificação do veículo<input name="vehicle" required maxlength="32" /></label>
+            <label>Carga<select name="cargo"><option value="General">Geral</option><option value="Refrigerated">Refrigerada</option></select></label>
+            <label>Peso (kg)<input type="number" min="1" max="2147483647" name="weightKg" required /></label>
+            <label>Início (UTC)<input type="datetime-local" name="startUtc" required /></label>
+            <label>Fim (UTC)<input type="datetime-local" name="endUtc" required /></label>
+            <label>Doca<select name="dockId"><option value="">Seleção automática</option>@foreach (var dock in Model.Board.Docks.Where(d => d.Operational).OrderBy(d => d.Code)) { <option value="@dock.Id">@dock.Code · @BoardPage.CargoLabel(dock.Cargo)</option> }</select></label>
+            <button class="primary" type="submit">Confirmar agendamento</button>
+        </form>
+        <p class="muted">A disponibilidade para todo o intervalo é confirmada ao agendar. Horários em UTC.</p>
+    </details>
+}
+<div id="board" data-snapshot="@Url.Action("Snapshot")"><partial name="_Board" model="Model" /></div>
+@section Scripts {
+    <script src="~/vendor/signalr.min.js" asp-append-version="true" defer></script>
+    <script src="~/board.js" asp-append-version="true" defer></script>
+}
