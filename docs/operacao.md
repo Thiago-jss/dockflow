@@ -13,6 +13,14 @@ python3 scripts/wait_ready.py
 
 O serviço `migrate` termina após aplicar migrations e, só no laboratório, semear duas organizações. A aplicação usa um usuário do banco sem permissão de DDL; o serviço de migração tem credencial separada. `docker compose stop` preserva o estado. Use `docker compose down` para remover contêineres e rede, sem apagar volumes. Gere outro laboratório em vez de apagar uma base que não identificou.
 
+## Observabilidade opcional
+
+```sh
+docker compose -f compose.yaml -f compose.observability.yaml up -d --build
+```
+
+O painel Grafana de laboratório está em <http://localhost:5193/d/dockflow-ops/> e Prometheus em <http://localhost:5194/>. O Collector recebe OTLP em rede interna; exporta métricas ao Prometheus e escreve apenas o resumo de spans no log. O painel mostra taxa, latência de requisições e leituras do cache. O span de indicadores é local ao Web; não há propagação de contexto ao Worker nem armazenamento de traces de produção. Nunca exponha o Grafana de laboratório com acesso anônimo fora do loopback.
+
 ## Falhas esperadas
 
 | Sintoma | Verificação |
