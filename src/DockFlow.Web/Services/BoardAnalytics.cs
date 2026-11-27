@@ -2,12 +2,12 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Globalization;
 using Microsoft.Extensions.Caching.Distributed;
-using Npgsql;
+using DockFlow.Application;
 using StackExchange.Redis;
 
 namespace DockFlow.Web;
 
-public sealed class BoardAnalytics(NpgsqlDataSource postgres, IDistributedCache cache, IMeterFactory meters)
+public sealed class BoardAnalytics(ICompletedUnloadingsReader reader, IDistributedCache cache, IMeterFactory meters)
 {
     internal const string InstrumentationName = "DockFlow.Operations";
     internal static readonly ActivitySource Activities = new(InstrumentationName);
@@ -25,15 +25,7 @@ public sealed class BoardAnalytics(NpgsqlDataSource postgres, IDistributedCache 
             return count;
         }
         cacheReads.Add(1, new KeyValuePair<string, object?>("outcome", "fallback"));
-        await using var command = postgres.CreateCommand("""
-            SELECT count(*) FROM public.audit_log
-            WHERE tenant_id=@tenant AND kind='UnloadingCompleted' AND occurred_at>=@day AND occurred_at<@end
-            """);
-        command.CommandTimeout = 5;
-        command.Parameters.AddWithValue("tenant", tenant);
-        command.Parameters.AddWithValue("day", day);
-        command.Parameters.AddWithValue("end", day.AddDays(1));
-        count = (long)(await command.ExecuteScalarAsync(ct))!;
+        count = await reader.CountAsync(tenant, day, ct);
         await WithCacheBudget(async token =>
         {
             await cache.SetStringAsync(key, count.ToString(CultureInfo.InvariantCulture),
