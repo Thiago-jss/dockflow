@@ -105,7 +105,7 @@
             <tr><th scope="row">@v.Vehicle <small>@BoardPage.CargoLabel(v.Cargo) · @v.WeightKg.ToString("N0") kg</small></th>
             <td class="cell-code">@v.DockCode</td><td class="cell-utc">@BoardPage.Stamp(v.Start) → @BoardPage.Stamp(v.End)</td><td><span class="pill visit-@v.Status.ToString().ToLowerInvariant()">@BoardPage.StatusLabel(v.Status)</span></td>
             <td><div class="actions">
-            @foreach (var item in BoardPage.Actions(v.Status).Where(item => Identity.Can(User, BoardPage.Roles(item.Action)) && (item.Action != VisitAction.NoShow || v.End <= Model.Now)))
+            @foreach (var item in BoardPage.Actions(v.Status).Where(item => Identity.Can(User, VisitActionAuthorization.Roles(item.Action)) && (item.Action != VisitAction.NoShow || v.End <= Model.Now)))
             {
                 <form method="post" asp-action="Move" asp-route-id="@v.Id">
                   <input type="hidden" name="returnDay" value="@Model.DayKey" /><input type="hidden" name="version" value="@v.Version" /><button name="action" value="@item.Action" type="submit">@item.Label</button>
