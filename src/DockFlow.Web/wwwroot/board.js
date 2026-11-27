@@ -20,7 +20,13 @@ async function refresh() {
         if (!response.ok || !response.headers.get("Content-Type")?.startsWith("text/html")) return;
         const html = await response.text();
         if (paused()) { pending = true; return; }
-        if (lastMarkup !== html) { board.innerHTML = html; lastMarkup = html; }
+        if (lastMarkup !== html) {
+            const scrollers = [".schedule-scroll", ".queue-scroll"];
+            const offsets = scrollers.map(selector => board.querySelector(selector)?.scrollLeft ?? 0);
+            board.innerHTML = html;
+            scrollers.forEach((selector, index) => board.querySelector(selector)?.scrollTo(offsets[index], 0));
+            lastMarkup = html;
+        }
     } catch { /* The next poll retries. */ }
     finally { refreshing = false; }
 }

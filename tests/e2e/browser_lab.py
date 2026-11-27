@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Drive the real Keycloak sign-in and authenticated DockFlow MVC view."""
 import argparse
+from datetime import date, timedelta
 import os
 from pathlib import Path
 import re
@@ -46,9 +47,10 @@ def run(args, password, sync_playwright, expect):
                 };""")
             page = context.new_page()
             captures = None
+            target = APP + args.path + (f'?day={args.day.isoformat()}' if args.day else '')
             try:
                 step = 'protected page redirects to the local Keycloak realm'
-                page.goto(APP + args.path, wait_until='domcontentloaded')
+                page.goto(target, wait_until='domcontentloaded')
                 expect(page).to_have_url(re.compile(r'^http://localhost:5192/realms/dockflow/protocol/openid-connect/auth\?'))
                 page.locator('#username').fill('manager-a')
                 # Do not expose the fill argument through Call Logs, tracing, videos or HARs.
@@ -56,7 +58,7 @@ def run(args, password, sync_playwright, expect):
                 page.locator('#password').fill(password)
                 page.locator('#kc-login').click()
                 step = 'authenticated appointment view loaded at the same protected URL'
-                expect(page).to_have_url(APP + args.path)
+                expect(page).to_have_url(target)
                 expect(page.get_by_role('heading', name=args.heading, exact=True)).to_be_visible()
                 if args.completed is not None:
                     step = 'the authenticated analytics count matches PostgreSQL'
@@ -71,13 +73,28 @@ def run(args, password, sync_playwright, expect):
                 result = page.reload(wait_until='domcontentloaded')
                 if result is None or result.status != 200:
                     raise RuntimeError('reload did not return HTTP 200')
-                expect(page).to_have_url(APP + args.path)
+                expect(page).to_have_url(target)
                 expect(page.get_by_role('heading', name=args.heading, exact=True)).to_be_visible()
+                step = 'day navigation and mobile width'
+                today_key = page.locator('#docas time').get_attribute('datetime')
+                if args.day and today_key != args.day.isoformat():
+                    raise RuntimeError('requested UTC day not rendered')
+                page.get_by_role('link', name='Próximo dia').click()
+                next_key = (date.fromisoformat(today_key) + timedelta(days=1)).isoformat()
+                expect(page.locator('#docas time')).to_have_attribute('datetime', next_key)
+                page.goto(target, wait_until='domcontentloaded')
+                page.set_viewport_size({'width': 390, 'height': 844})
+                if not page.evaluate('document.documentElement.scrollWidth === document.documentElement.clientWidth'):
+                    raise RuntimeError('mobile page has horizontal overflow')
+                if args.demo_captures:
+                    EVIDENCE.mkdir(mode=0o700, exist_ok=True)
+                    page.screenshot(path=str(EVIDENCE / 'dispatch-mobile.png'), full_page=True)
+                page.set_viewport_size({'width': 1440, 'height': 960})
                 if vehicle is not None:
                     expect(vehicle).to_be_visible()
                     step = 'tenant board receives a live invalidation while an operator moves the visit'
                     observer = context.new_page()
-                    observer.goto(APP + args.path, wait_until='domcontentloaded')
+                    observer.goto(target, wait_until='domcontentloaded')
                     expect(observer.get_by_text('Conectado · ao vivo', exact=True)).to_be_visible()
                     row = page.get_by_role('row').filter(has=vehicle)
                     csrfless = context.request.post(APP + row.locator('form').first.get_attribute('action'),
@@ -94,6 +111,9 @@ def run(args, password, sync_playwright, expect):
                         step = f'yard transition: {button}'
                         row.get_by_role('button', name=button, exact=True).click()
                         expect(row.get_by_text(status, exact=True)).to_be_visible()
+                        expect(page.locator('#docas time')).to_have_attribute('datetime', today_key)
+                        if status == 'Em operação':
+                            expect(page.get_by_role('complementary', name='Ocorrências').get_by_text('Ocupada', exact=True).first).to_be_visible()
                         if captures is not None:
                             page.screenshot(path=str(captures / f'frame-{i:02d}.png'))
                     step = 'verify actual SSE invalidation, not only the polling fallback'
@@ -128,6 +148,7 @@ def main():
     parser.add_argument('--vehicle', help='optional synthetic plate already seeded in tenant A')
     parser.add_argument('--demo-captures', action='store_true', help='save authenticated progress frames for a short demo')
     parser.add_argument('--completed', type=int, help='expected completed-today counter')
+    parser.add_argument('--day', type=date.fromisoformat, help='UTC agenda day (YYYY-MM-DD)')
     args = parser.parse_args()
     if not args.path.startswith('/') or any(c in args.path for c in '\\?#\r\n') or args.path.startswith('//'):
         parser.error('--path must be an unambiguous absolute path on the fixed app origin')

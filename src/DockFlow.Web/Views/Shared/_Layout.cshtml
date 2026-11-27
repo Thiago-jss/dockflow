@@ -7,14 +7,20 @@
     <link rel="stylesheet" href="~/dockflow.css" asp-append-version="true" />
 </head>
 <body>
-<header class="top"><div class="wrap top-inner"><a class="brand" href="/"><span aria-hidden="true">▦</span> DockFlow</a>
-@if (User.Identity?.IsAuthenticated == true)
-{
-    <form method="post" asp-controller="Dashboard" asp-action="SignOutOfApp"><button class="quiet" type="submit">Sair do painel</button></form>
-}
+<a class="skip" href="#main">Ir para o conteúdo</a>
+<header class="top"><div class="wrap top-inner">
+  <a class="brand" href="/" aria-label="DockFlow, início">
+    <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true"><path fill="currentColor" d="M0 0h36v36H0z"/><path fill="#19221c" d="M8 27V9h11l9 9-9 9H8zm5-5h4l4-4-4-4h-4v8z"/></svg>
+    <span>DockFlow<small>CONTROLE DE PÁTIO</small></span>
+  </a>
+  @if (User.Identity?.IsAuthenticated == true)
+  {
+    <nav class="top-nav" aria-label="Área de operação"><a href="/#docas">Agenda</a><a href="/#fila">Fila</a><a href="/#ocorrencias">Ocorrências</a></nav>
+    <form method="post" asp-controller="Dashboard" asp-action="SignOutOfApp"><button class="quiet session-exit" type="submit">Sair do painel</button></form>
+  }
 </div></header>
-<main class="wrap" id="main">@RenderBody()</main>
-<footer class="wrap">DockFlow <span> / </span> Operações de pátio</footer>
+<main class="wrap" id="main" tabindex="-1">@RenderBody()</main>
+<footer class="wrap"><span>DOCKFLOW / CENTRAL DE PÁTIO</span><span>Horários em UTC</span></footer>
 @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

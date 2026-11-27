@@ -2,71 +2,123 @@
 @{
     var manager = Identity.Can(User, Identity.Managers);
     var visits = Model.Board.Visits.OrderBy(v => !BoardPage.Active(v)).ThenBy(v => v.Start).ToList();
-    var free = Model.Board.Docks.Count(d => Model.DockState(d) == "Livre agora");
+    var docks = Model.Board.Docks.OrderBy(d => d.Code).ToList();
+    var active = visits.Where(BoardPage.PhysicallyPresent).ToList();
+    var planned = visits.Where(v => Model.SpansDay(v) && v.Status is not (VisitStatus.Cancelled or VisitStatus.NoShow)).ToList();
+    var today = DateOnly.FromDateTime(Model.Now.UtcDateTime);
+    var next = planned.FirstOrDefault(v => v.Start > Model.Now && BoardPage.Active(v));
+    var dateTitle = Model.Day.ToString("dddd, dd 'de' MMMM");
 }
-<div class="section-title"><div><p class="eyebrow">01 / DISPONIBILIDADE</p><h2>Docas</h2></div><p>@free livre(s) de @Model.Board.Docks.Count · @Model.Now.ToString("HH:mm:ss") UTC</p></div>
-<p class="muted">@Model.CompletedToday descarga(s) concluída(s) hoje · UTC · indicador pode atrasar até 15 s</p>
-@if (Model.Board.Docks.Count == 0) { <p class="panel empty">Nenhuma doca cadastrada.</p> }
-<div class="dock-grid">
-@foreach (var dock in Model.Board.Docks.OrderBy(d => d.Code))
-{
-    var state = Model.DockState(dock);
-    var badge = !dock.Operational ? "blocked" : state == "Livre agora" ? "free" : "occupied";
-    var next = visits.FirstOrDefault(v => v.DockId == dock.Id && BoardPage.Active(v) && v.Start > Model.Now);
-    <article class="panel dock">
-        <div class="dock-title"><h3>@dock.Code</h3><span class="pill @badge">@state</span></div>
-        <p>@BoardPage.CargoLabel(dock.Cargo) · até @dock.MaxWeightKg.ToString("N0") kg</p>
-        <p class="muted">@(next is null ? "Sem próxima reserva no painel" : $"Próxima reserva: {BoardPage.Stamp(next.Start)} UTC")</p>
-        @if (manager && dock.Operational)
+<dl class="dispatch-manifest" aria-label="Resumo da operação atual">
+    <div><dt>Em doca agora</dt><dd>@active.Count<span> / @docks.Count</span></dd></div>
+    <div><dt>Aguardando alocação</dt><dd>@visits.Count(v => v.Status == VisitStatus.CheckedIn)</dd></div>
+    <div><dt>Concluídas hoje <span>· UTC</span></dt><dd>@Model.CompletedToday<small class="sr">@Model.CompletedToday descarga(s) concluída(s) hoje · UTC</small></dd></div>
+    <div><dt>Docas bloqueadas</dt><dd>@docks.Count(d => !d.Operational)</dd></div>
+</dl>
+<div class="dispatch-grid">
+<section id="docas" class="dispatch-sheet" aria-labelledby="agenda-title">
+    <header class="sheet-header">
+        <div><p class="eyebrow">01 / Programação</p><h2 id="agenda-title">Janelas por doca</h2><p class="sheet-note"><time datetime="@Model.DayKey">@dateTitle</time> · @planned.Count no dia</p></div>
+        <div class="date-controls">
+            <a href="@Url.Action("Index", new { day = Model.Day.AddDays(-1).ToString("yyyy-MM-dd") })#docas" aria-label="Dia anterior">‹</a>
+            <a href="@Url.Action("Index")#docas">Hoje</a>
+            <a href="@Url.Action("Index", new { day = Model.Day.AddDays(1).ToString("yyyy-MM-dd") })#docas" aria-label="Próximo dia">›</a>
+        </div>
+    </header>
+    <div class="schedule-scroll" tabindex="0" role="region" aria-label="Grade de horários por doca, em UTC">
+    @if (docks.Count == 0) { <p class="empty">Nenhuma doca cadastrada.</p> }
+    else
+    {
+      <div class="schedule">
+        <div class="schedule-axis" aria-hidden="true"><span>DOCA</span><div><span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span></div></div>
+        @foreach (var dock in docks)
         {
-            <details data-pause-refresh><summary>Bloquear doca</summary>
-                <form method="post" asp-action="Block" asp-route-id="@dock.Id" class="block-form">
-                    <label>Motivo<input name="reason" maxlength="200" required /></label><button type="submit">Bloquear</button>
-                </form>
-            </details>
+            var blocks = planned.Where(v => v.DockId == dock.Id).ToList();
+            <div class="schedule-line">
+                <div class="dock-tag"><strong>@dock.Code</strong><span>@BoardPage.CargoLabel(dock.Cargo)</span></div>
+                <svg class="track @(!dock.Operational ? "track-blocked" : "")" viewBox="0 0 1440 46" preserveAspectRatio="none" role="img" aria-label="@dock.Code: @blocks.Count janela(s) na data selecionada">
+                    @foreach (var block in blocks)
+                    {
+                        var begin = Model.Minute(block.Start);
+                        var duration = Model.Minute(block.End) - begin;
+                        <rect x="@begin" y="8" width="@duration" height="30" rx="5" class="@(block.Status == VisitStatus.Completed ? "slot-done" : BoardPage.PhysicallyPresent(block) ? "slot-active" : "slot-booked")">
+                            <title>@block.Vehicle · @BoardPage.Stamp(block.Start) → @BoardPage.Stamp(block.End) UTC · @BoardPage.StatusLabel(block.Status)</title>
+                        </rect>
+                    }
+                    @if (Model.Day == today) { <line x1="@Model.Minute(Model.Now)" x2="@Model.Minute(Model.Now)" y1="0" y2="46" class="now-marker" /> }
+                </svg>
+            </div>
         }
-    </article>
-}
-</div>
-<section aria-labelledby="visitas">
-<div class="section-title"><div><p class="eyebrow">02 / FLUXO DE VEÍCULOS</p><h2 id="visitas">Fila e agenda</h2></div><p>@visits.Count(v => v.Status == VisitStatus.CheckedIn) aguardando alocação · horários UTC</p></div>
-@if (visits.Count == 0) { <p class="panel empty">Nenhuma visita encontrada.</p> }
-else
-{
-<div class="panel scroll" tabindex="0" aria-label="Tabela de visitas">
-<table><thead><tr><th scope="col">Veículo</th><th scope="col">Doca</th><th scope="col">Janela (UTC)</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>
-@foreach (var v in visits)
-{
-    <tr><th scope="row">@v.Vehicle <small>@BoardPage.CargoLabel(v.Cargo) · @v.WeightKg.ToString("N0") kg</small></th>
-    <td>@v.DockCode</td><td>@BoardPage.Stamp(v.Start) → @BoardPage.Stamp(v.End)</td><td><span class="pill">@BoardPage.StatusLabel(v.Status)</span></td>
-    <td><div class="actions">
-    @foreach (var item in BoardPage.Actions(v.Status).Where(item => Identity.Can(User, BoardPage.Roles(item.Action)) && (item.Action != VisitAction.NoShow || v.End <= Model.Now)))
-    {
-        <form method="post" asp-action="Move" asp-route-id="@v.Id">
-            <input type="hidden" name="version" value="@v.Version" /><button name="action" value="@item.Action" type="submit">@item.Label</button>
-        </form>
+      </div>
     }
-    @if (manager && v.Status is (VisitStatus.Scheduled or VisitStatus.CheckedIn))
-    {
-        <form method="post" asp-action="Reassign" asp-route-id="@v.Id">
-            <input type="hidden" name="version" value="@v.Version" /><button type="submit">Realocar</button>
-        </form>
-    }
-    </div></td></tr>
-}
-</tbody></table></div>
-}
+    </div>
+    <div class="schedule-footer">
+        <ul class="legend" aria-label="Legenda da agenda"><li class="key-booked">Reservada</li><li class="key-active">Veículo presente</li><li class="key-done">Concluída</li>@if (Model.Day == today) { <li class="key-now">Agora</li> }</ul>
+        @if (planned.Count == 0) { <p>Sem janelas nesta data.</p> }
+        else if (next is not null) { <p>Próxima: <strong>@next.DockCode / @next.Start.ToUniversalTime().ToString("HH:mm") UTC</strong></p> }
+    </div>
 </section>
-<section aria-labelledby="incidentes">
-<div class="section-title"><div><p class="eyebrow">03 / EXCEÇÕES</p><h2 id="incidentes">Incidentes</h2></div><p>@Model.Board.Incidents.Count registro(s)</p></div>
-@if (Model.Board.Incidents.Count == 0) { <p class="panel empty">Nenhum incidente registrado.</p> }
-else
-{
-    <ul class="panel incidents">
-    @foreach (var item in Model.Board.Incidents.OrderByDescending(i => i.DetectedAt))
+<aside id="ocorrencias" class="exception-sheet" aria-labelledby="exceptions-title">
+    <div class="exception-title"><p class="eyebrow">02 / Atenção</p><h2 id="exceptions-title">Ocorrências</h2></div>
+    @if (Model.Board.Incidents.Count == 0) { <div class="empty-incident"><span aria-hidden="true">✓</span><strong>Sem ocorrências</strong><p>Atrasos e manutenções registrados aparecem aqui.</p></div> }
+    else
     {
-        <li><strong>@item.Kind</strong><span>Doca @(Model.Board.Docks.FirstOrDefault(d => d.Id == item.DockId)?.Code ?? "—") · @BoardPage.Stamp(item.DetectedAt) UTC</span><span class="pill">@item.Status</span></li>
+        <ul class="incident-list">
+        @foreach (var item in Model.Board.Incidents.OrderByDescending(i => i.DetectedAt))
+        {
+            var code = docks.FirstOrDefault(d => d.Id == item.DockId)?.Code ?? "—";
+            <li><span class="incident-code">@code</span><div><strong>@BoardPage.IncidentLabel(item.Kind)</strong><small>@BoardPage.Stamp(item.DetectedAt) UTC · @(item.Status == "Open" ? "Em aberto" : item.Status)</small></div></li>
+        }
+        </ul>
     }
-    </ul>
-}
+    <div class="condition"><h3>Estado físico agora</h3>
+      @foreach (var dock in docks)
+      {
+        var state = Model.DockState(dock);
+        var vehicle = active.FirstOrDefault(v => v.DockId == dock.Id);
+        <div class="condition-line">
+          <div><strong>@dock.Code</strong><span class="condition-state @(state == "Ocupada" ? "is-occupied" : !dock.Operational ? "is-blocked" : "")">@state @if (!dock.Operational && vehicle is not null) { <text>· bloqueada</text> }</span></div>
+          @if (vehicle is not null) { <small>@vehicle.Vehicle</small> }
+          @if (manager && dock.Operational)
+          {
+            <details data-pause-refresh><summary>Bloquear doca</summary>
+              <form method="post" asp-action="Block" asp-route-id="@dock.Id" class="block-form">
+                <input type="hidden" name="returnDay" value="@Model.DayKey" />
+                <label>Motivo<input name="reason" maxlength="200" required /></label><button type="submit">Bloquear</button>
+              </form>
+            </details>
+          }
+        </div>
+      }
+    </div>
+</aside>
+</div>
+<section id="fila" class="queue-sheet" aria-labelledby="visitas">
+    <header class="sheet-header"><div><p class="eyebrow">03 / Movimentação</p><h2 id="visitas">Fila e agenda</h2></div><p class="sheet-note">Todas as visitas · ativas primeiro</p></header>
+    @if (visits.Count == 0) { <p class="empty">Nenhuma visita encontrada.</p> }
+    else
+    {
+        <div class="queue-scroll" tabindex="0" role="region" aria-label="Tabela de visitas">
+        <table><thead><tr><th scope="col">Veículo / carga</th><th scope="col">Doca</th><th scope="col">Janela (UTC)</th><th scope="col">Situação</th><th scope="col">Ações</th></tr></thead><tbody>
+        @foreach (var v in visits)
+        {
+            <tr><th scope="row">@v.Vehicle <small>@BoardPage.CargoLabel(v.Cargo) · @v.WeightKg.ToString("N0") kg</small></th>
+            <td class="cell-code">@v.DockCode</td><td class="cell-utc">@BoardPage.Stamp(v.Start) → @BoardPage.Stamp(v.End)</td><td><span class="pill visit-@v.Status.ToString().ToLowerInvariant()">@BoardPage.StatusLabel(v.Status)</span></td>
+            <td><div class="actions">
+            @foreach (var item in BoardPage.Actions(v.Status).Where(item => Identity.Can(User, BoardPage.Roles(item.Action)) && (item.Action != VisitAction.NoShow || v.End <= Model.Now)))
+            {
+                <form method="post" asp-action="Move" asp-route-id="@v.Id">
+                  <input type="hidden" name="returnDay" value="@Model.DayKey" /><input type="hidden" name="version" value="@v.Version" /><button name="action" value="@item.Action" type="submit">@item.Label</button>
+                </form>
+            }
+            @if (manager && v.Status is (VisitStatus.Scheduled or VisitStatus.CheckedIn))
+            {
+              <form method="post" asp-action="Reassign" asp-route-id="@v.Id">
+                  <input type="hidden" name="returnDay" value="@Model.DayKey" /><input type="hidden" name="version" value="@v.Version" /><button type="submit">Realocar</button>
+              </form>
+            }
+            </div></td></tr>
+        }
+        </tbody></table></div>
+    }
 </section>

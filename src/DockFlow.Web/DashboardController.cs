@@ -27,16 +27,19 @@ public sealed class DashboardController(IDockOperations operations, BoardUpdates
     }
 
     [HttpGet("/")]
-    public async Task<IActionResult> Index(CancellationToken ct) => View(await ReadAsync(ct));
+    public async Task<IActionResult> Index(string? day, CancellationToken ct) => View(await ReadAsync(day, ct));
 
     [HttpGet("/painel/estado")]
-    public async Task<IActionResult> Snapshot(CancellationToken ct) => PartialView("_Board", await ReadAsync(ct));
+    public async Task<IActionResult> Snapshot(string? day, CancellationToken ct) => PartialView("_Board", await ReadAsync(day, ct));
 
-    private async Task<BoardPage> ReadAsync(CancellationToken ct)
+    private async Task<BoardPage> ReadAsync(string? day, CancellationToken ct)
     {
         var now = DateTimeOffset.UtcNow;
         var board = await operations.BoardAsync(Current, ct);
-        return new(board, now, await analytics.CompletedTodayAsync(Current.TenantId, now, ct));
+        var parsed = DateOnly.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date);
+        var today = DateOnly.FromDateTime(now.UtcDateTime);
+        return new(board, now, await analytics.CompletedTodayAsync(Current.TenantId, now, ct),
+            parsed && Math.Abs(date.DayNumber - today.DayNumber) <= 365 ? date : today);
     }
 
     [HttpPost("/painel/agendar"), Authorize(Roles = Identity.Managers)]
@@ -74,7 +77,7 @@ public sealed class DashboardController(IDockOperations operations, BoardUpdates
     private IActionResult InvalidForm()
     {
         TempData["error"] = "Confira os dados e tente novamente.";
-        return RedirectToAction(nameof(Index));
+        return BackToBoard();
     }
 
     private async Task<IActionResult> Commit(Func<Task> operation)
@@ -91,12 +94,24 @@ public sealed class DashboardController(IDockOperations operations, BoardUpdates
                 ? "A operação conflita com o estado atual. Confira a disponibilidade e tente novamente."
                 : "A operação não pôde ser realizada. Confira os dados e o estado da visita.";
         }
-        return RedirectToAction(nameof(Index));
+        return BackToBoard();
     }
+
+    private IActionResult BackToBoard() => RedirectToAction(nameof(Index), new
+    {
+        day = DateOnly.TryParseExact(Request.Form["returnDay"].ToString(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+            DateTimeStyles.None, out var day) ? day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : null
+    });
 }
 
-public sealed record BoardPage(Board Board, DateTimeOffset Now, long CompletedToday)
+public sealed record BoardPage(Board Board, DateTimeOffset Now, long CompletedToday, DateOnly Day)
 {
+    public DateTimeOffset DayStart => new(Day.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+    public string DayKey => Day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    public bool SpansDay(Visit visit) => visit.Start < DayStart.AddDays(1) && visit.End > DayStart;
+    public int Minute(DateTimeOffset instant) => (int)Math.Clamp((instant - DayStart).TotalMinutes, 0, 1440);
+    public static bool PhysicallyPresent(Visit visit) => visit.Status is VisitStatus.Assigned or VisitStatus.InProgress;
+    public static string IncidentLabel(string kind) => kind switch { "Maintenance" => "Manutenção", "Overrun" => "Janela excedida", _ => kind };
     public static string Roles(VisitAction action) => action switch
     {
         VisitAction.CheckIn => Identity.Gate,
@@ -105,9 +120,9 @@ public sealed record BoardPage(Board Board, DateTimeOffset Now, long CompletedTo
         _ => ""
     };
     public static bool Active(Visit v) => v.Status is VisitStatus.Scheduled or VisitStatus.CheckedIn or VisitStatus.Assigned or VisitStatus.InProgress;
-    public string DockState(DockView dock) => !dock.Operational ? "Bloqueada" :
-        Board.Visits.Any(v => v.DockId == dock.Id && Active(v) &&
-            (v.Status is VisitStatus.Assigned or VisitStatus.InProgress || (v.Start <= Now && Now < v.End))) ? "Ocupada / reservada" : "Livre agora";
+    public string DockState(DockView dock) => Board.Visits.Any(v => v.DockId == dock.Id && PhysicallyPresent(v)) ? "Ocupada" :
+        !dock.Operational ? "Bloqueada" : Board.Visits.Any(v => v.DockId == dock.Id && Active(v) && v.Start <= Now && Now < v.End)
+            ? "Janela reservada" : "Livre agora";
     public static string Stamp(DateTimeOffset date) => date.ToUniversalTime().ToString("dd/MM HH:mm", CultureInfo.InvariantCulture);
     public static string CargoLabel(CargoKind cargo) => cargo == CargoKind.Refrigerated ? "Refrigerada" : "Geral";
     public static string StatusLabel(VisitStatus status) => status switch

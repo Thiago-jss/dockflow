@@ -1,15 +1,16 @@
 @model BoardPage
 @{ ViewData["Title"] = "Painel de operações"; }
-<section class="hero">
-    <div><p class="eyebrow">CENTRAL DE OPERAÇÕES / PÁTIO</p><h1>Painel de docas</h1><p>Acompanhe a disponibilidade, a fila de visitas e os incidentes.</p></div>
-    <div class="hero-controls"><span id="connection-status" role="status" class="pill">Atualização periódica</span><a href="/" class="quiet">Recarregar</a></div>
+<section class="dispatch-heading">
+    <div><p class="eyebrow"><span aria-hidden="true">//</span> Quadro de despacho</p><h1>Painel de docas</h1><p>Planeje as janelas de atendimento sem perder de vista quem já está no pátio.</p></div>
+    <div class="dispatch-meta"><span id="connection-status" class="live-status" role="status">Atualização periódica</span><span class="utc-label">DATA E HORA / UTC</span></div>
 </section>
 @if (TempData["success"] is string success) { <p class="notice" role="status">@success</p> }
 @if (TempData["error"] is string error) { <p class="notice error" role="alert">@error</p> }
 @if (Identity.Can(User, Identity.Managers))
 {
-    <details class="panel booking" data-pause-refresh><summary>Novo agendamento</summary>
+    <details class="panel booking" data-pause-refresh><summary><span aria-hidden="true">＋</span> Novo agendamento</summary>
         <form method="post" asp-action="Schedule" class="booking-form">
+            <input type="hidden" name="returnDay" value="@Model.DayKey" />
             <input type="hidden" name="requestKey" value="@Guid.NewGuid()" />
             <label>Identificação do veículo<input name="vehicle" required maxlength="32" /></label>
             <label>Carga<select name="cargo"><option value="General">Geral</option><option value="Refrigerated">Refrigerada</option></select></label>
@@ -22,7 +23,7 @@
         <p class="muted">A disponibilidade para todo o intervalo é confirmada ao agendar. Horários em UTC.</p>
     </details>
 }
-<div id="board" data-snapshot="@Url.Action("Snapshot")"><partial name="_Board" model="Model" /></div>
+<div id="board" data-snapshot="@Url.Action("Snapshot", new { day = Model.DayKey })"><partial name="_Board" model="Model" /></div>
 @section Scripts {
     <script src="~/vendor/signalr.min.js" asp-append-version="true" defer></script>
     <script src="~/board.js" asp-append-version="true" defer></script>
