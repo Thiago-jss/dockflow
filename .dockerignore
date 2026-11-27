@@ -4,6 +4,10 @@
 .local
 .local-build
 artifacts
+tests
+docs
+**/.venv
+**/artifacts
 **/bin
 **/obj
 **/node_modules

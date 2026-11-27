@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DockFlow.Application/DockFlow.Application.csproj" />
+    <Project Path="src/DockFlow.Domain/DockFlow.Domain.csproj" />
+    <Project Path="src/DockFlow.Infrastructure/DockFlow.Infrastructure.csproj" />
+    <Project Path="src/DockFlow.Web/DockFlow.Web.csproj" />
+    <Project Path="src/DockFlow.Worker/DockFlow.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DockFlow.CoreTests/DockFlow.CoreTests.csproj" />
+    <Project Path="tests/DockFlow.WorkerTests/DockFlow.WorkerTests.csproj" />
+  </Folder>
+</Solution>

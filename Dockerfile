@@ -2,8 +2,8 @@ FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:8c6edfb26c85153f236d26efebd9ad349a
 WORKDIR /src
 COPY global.json Directory.Build.props ./
 COPY src/ ./src/
-RUN dotnet publish src/DockFlow.Web/DockFlow.Web.csproj -c Release -o /out/web -p:UseAppHost=false \
-    && dotnet publish src/DockFlow.Worker/DockFlow.Worker.csproj -c Release -o /out/worker -p:UseAppHost=false
+RUN dotnet publish src/DockFlow.Web/DockFlow.Web.csproj -c Release -o /out/web -p:UseAppHost=false -p:RestoreLockedMode=true \
+    && dotnet publish src/DockFlow.Worker/DockFlow.Worker.csproj -c Release -o /out/worker -p:UseAppHost=false -p:RestoreLockedMode=true
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:aac50ceef10391e78a899e3d2ccd00bbafa2dcb56ccf4586cbccf00edb84fc21 AS web
 WORKDIR /app

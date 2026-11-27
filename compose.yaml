@@ -71,6 +71,7 @@ services:
       Identity__AllowHttp: 'true'
   web:
     <<: [*web_image, *hardened]
+    networks: [default, ingress]
     depends_on:
       migrate: {condition: service_completed_successfully}
       keycloak: {condition: service_started}
@@ -84,7 +85,7 @@ services:
       Identity__Audience: dockflow-api
       Identity__ClientSecret: '${DOCKFLOW_WEB_SECRET:?run scripts/bootstrap.py}'
       Identity__AllowHttp: 'true'
-      ASPNETCORE_FORWARDEDHEADERS_ENABLED: 'true'
+      Ingress__KnownProxies__0: '172.29.137.10'
       ConnectionStrings__Redis: 'redis:6379,password=${DOCKFLOW_REDIS_PASSWORD:?run scripts/bootstrap.py},connectTimeout=500,asyncTimeout=500,abortConnect=false'
   worker:
     <<: *hardened
@@ -102,6 +103,8 @@ services:
     image: caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
     depends_on: [web]
     ports: ['127.0.0.1:5191:5191']
+    networks:
+      ingress: {ipv4_address: '172.29.137.10'}
     volumes:
       - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - type: bind
@@ -117,3 +120,7 @@ services:
 volumes:
   db-data:
   mq-data:
+networks:
+  ingress:
+    ipam:
+      config: [{subnet: '172.29.137.0/24'}]
