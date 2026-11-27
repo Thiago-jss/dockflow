@@ -2,6 +2,8 @@
 **/obj/
 **/TestResults/
 **/node_modules/
+**/.venv/
+**/artifacts/
 **/__pycache__/
 /.local/
 /.local-build/

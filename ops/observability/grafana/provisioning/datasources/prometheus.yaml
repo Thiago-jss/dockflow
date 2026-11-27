@@ -1,0 +1,9 @@
+apiVersion: 1
+datasources:
+  - name: DockFlow Prometheus
+    type: prometheus
+    uid: dockflow-prom
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false

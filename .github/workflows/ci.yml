@@ -1,0 +1,45 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.12'
+      - run: dotnet restore DockFlow.slnx --locked-mode
+      - run: dotnet build DockFlow.slnx -c Release --no-restore
+      - run: dotnet test tests/DockFlow.CoreTests -c Release --no-build --no-restore
+      - run: bash tests/DockFlow.WorkerTests/run-integration.sh
+      - name: Provision lab and install Chromium
+        run: |
+          python -m unittest discover -s tests/provisioning -v
+          python scripts/bootstrap.py
+          python -m pip install playwright==1.61.0
+          python -m playwright install --with-deps chromium
+      - name: Verify the authenticated app, broker outage and operator workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose -p dockflow-ci up -d --build
+          python scripts/check_identity.py
+          python scripts/wait_ready.py
+          python scripts/lab.py api | tee "$RUNNER_TEMP/dockflow-api.log"
+          vehicle=$(python -c 'import re,sys; s=open(sys.argv[1]).read(); print(re.search(r"vehicle=([A-Z0-9]+)",s).group(1))' "$RUNNER_TEMP/dockflow-api.log")
+          python scripts/lab.py browser --vehicle "$vehicle"
+          python scripts/broker_lab.py --project dockflow-ci
+      - name: Stop the isolated CI lab
+        if: always()
+        run: test ! -f .env || docker compose -p dockflow-ci down --volumes
