@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+.local
+.local-build
+artifacts
+**/bin
+**/obj
+**/node_modules
+**/TestResults
+**/__pycache__
+*.pem
+*.key
+*.crt
+*.pfx
