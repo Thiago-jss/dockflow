@@ -26,6 +26,7 @@ public static class InfrastructureServices
         services.AddSingleton(new DemoProvisioning(bool.TryParse(configuration["DockFlow:SeedDemo"], out var seed) && seed));
         services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<IDockOperations, PostgresDockOperations>();
+        services.AddSingleton<ICompletedUnloadingsReader, PostgresCompletedUnloadingsReader>();
         return services;
     }
 

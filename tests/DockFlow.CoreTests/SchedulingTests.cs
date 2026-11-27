@@ -57,6 +57,39 @@ public sealed class SchedulingTests : IAsyncLifetime
     private static async Task Reject(int status, Func<Task> run) => Assert.Equal(status, (await Assert.ThrowsAsync<OperationRejected>(run)).Status);
 
     [Fact]
+    public async Task CompletedUnloadingsCountIsTenantScopedAndUsesHalfOpenUtcDay()
+    {
+        var day = new DateTimeOffset(2035, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var otherTenant = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var reader = services.GetRequiredService<ICompletedUnloadingsReader>();
+        Assert.Equal(0L, await reader.CountAsync(A.TenantId, day, Ct));
+
+        var source = services.GetRequiredService<NpgsqlDataSource>();
+        foreach (var (tenant, stamp, kind) in new[]
+        {
+            (A.TenantId, day.AddSeconds(-1), "UnloadingCompleted"),
+            (A.TenantId, day, "UnloadingCompleted"),
+            (A.TenantId, day.AddDays(1).AddSeconds(-1), "UnloadingCompleted"),
+            (A.TenantId, day.AddDays(1), "UnloadingCompleted"),
+            (A.TenantId, day.AddHours(12), "UnloadingStarted"),
+            (otherTenant, day, "UnloadingCompleted")
+        })
+        {
+            await using var command = source.CreateCommand("""
+                INSERT INTO public.audit_log(id,tenant_id,kind,aggregate_id,occurred_at,subject,detail)
+                VALUES (gen_random_uuid(),@tenant,@kind,gen_random_uuid(),@stamp,'reader-test','{}'::jsonb)
+                """);
+            command.Parameters.AddWithValue("tenant", tenant);
+            command.Parameters.AddWithValue("kind", kind);
+            command.Parameters.AddWithValue("stamp", stamp);
+            await command.ExecuteNonQueryAsync(Ct);
+        }
+
+        Assert.Equal(2L, await reader.CountAsync(A.TenantId, day, Ct));
+        Assert.Equal(1L, await reader.CountAsync(otherTenant, day, Ct));
+    }
+
+    [Fact]
     public async Task OneOfOneHundredWinsAndAdjacentWindowIsFree()
     {
         var dock = await Dock();

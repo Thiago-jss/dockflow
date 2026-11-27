@@ -26,6 +26,7 @@ if (migrate)
 
 Identity.Configure(builder);
 builder.Services.AddSingleton<BoardAnalytics>();
+builder.Services.AddSingleton<BoardPageQuery>();
 if (builder.Configuration.GetConnectionString("Redis") is { Length: > 0 } redis)
     builder.Services.AddStackExchangeRedisCache(o => o.Configuration = redis);
 else

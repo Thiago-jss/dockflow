@@ -74,6 +74,12 @@ def appointment_id(raw, label):
         raise Failure(f'{label}: expected appointment UUID in id') from None
 
 
+def appointment_response(data, label):
+    fields = {'id', 'dockId', 'dockCode', 'vehicle', 'cargo', 'weightKg', 'start', 'end', 'status', 'version'}
+    require(isinstance(data, dict) and set(data) == fields, f'{label}: appointment response fields changed')
+    return data
+
+
 def stamp(value):
     return value.isoformat(timespec='seconds').replace('+00:00', 'Z')
 
@@ -104,11 +110,8 @@ def conflict_is(result, code, label):
 
 def listing(raw):
     data = json_body(raw, 'list appointments')
-    if isinstance(data, dict):
-        data = data.get('items')
-    if not isinstance(data, list) or not all(isinstance(row, dict) and 'id' in row for row in data):
-        raise Failure('list appointments: expected array (or items) of appointments with id')
-    return Counter(str(row['id']).lower() for row in data)
+    require(isinstance(data, list), 'list appointments: expected an array')
+    return Counter(str(appointment_response(row, 'list item')['id']).lower() for row in data)
 
 
 def run(args):
@@ -163,12 +166,14 @@ def run(args):
     owner, key, winner, (_, raw) = next(item for item in results if item[3][0] == 201)
     peer = b if owner == a else a
     winner_id = appointment_id(raw, 'create winner')
-    winning_visit = json_body(raw, 'create winner')
-    require(winning_visit.get('status') == 'Scheduled' and winning_visit.get('dockId') == GENERAL_DOCK,
+    winning_visit = appointment_response(json_body(raw, 'create winner'), 'create winner')
+    require(winning_visit['status'] == 'Scheduled' and winning_visit['dockId'] == GENERAL_DOCK and
+            winning_visit['cargo'] == winner['cargo'] and type(winning_visit['version']) is int,
             'winner must be scheduled on G-01')
     uri = f'{API}/{winner_id}'
-    require(appointment_id(status_is(get(owner, uri), {200}, 'owner reads winner'), 'owner read') == winner_id,
-            'owner read returned a different appointment')
+    detail = status_is(get(owner, uri), {200}, 'owner reads winner')
+    require(appointment_response(json_body(detail, 'owner detail'), 'owner detail') == winning_visit,
+            'owner read differs from the created appointment')
     for label, bearer in [('same tenant, other carrier', peer), ('other tenant', c)]:
         status_is(get(bearer, uri), {404}, f'{label} detail concealed')
         require(winner_id not in listing(status_is(get(bearer), {200}, f'{label} list')),
@@ -176,7 +181,8 @@ def run(args):
 
     # Change the slot so a 409 cannot be mistaken for ordinary dock contention.
     replay = status_is(post(owner, winner, key), {200, 201}, 'identical replay')
-    require(appointment_id(replay, 'identical replay') == winner_id, 'replay created a new appointment')
+    require(appointment_response(json_body(replay, 'identical replay'), 'identical replay') == winning_visit,
+            'replay changed the original appointment response')
     conflict_is(post(owner, payload(101, 30), key), 'idempotency_mismatch', 'different input with same key')
     adjacent = status_is(post(owner, payload(102, 30), f'{run_id}-adjacent'), {201}, 'adjacent slot')
     require(appointment_id(adjacent, 'adjacent slot') != winner_id, 'adjacent slot reused the winner ID')
@@ -185,12 +191,20 @@ def run(args):
     # Positive control rules out an unavailable or unseeded refrigerated dock.
     cold = status_is(post(owner, payload(104, 60, REFRIGERATED_DOCK, args.refrigerated_cargo), f'{run_id}-compatible'),
                      {201}, 'compatible refrigerated cargo on R-01')
-    require(json_body(cold, 'compatible R-01 request').get('dockId') == REFRIGERATED_DOCK,
+    cold_visit = appointment_response(json_body(cold, 'compatible R-01 request'), 'compatible R-01 request')
+    require(cold_visit['dockId'] == REFRIGERATED_DOCK,
             'compatible R-01 request was not assigned to R-01')
+    cancelled = request(f'{API}/{cold_visit["id"]}/cancel', 'POST',
+                        headers={'Authorization': f'Bearer {owner}', 'Content-Type': 'application/json'},
+                        body=json.dumps({'version': cold_visit['version']}), context=context)
+    cancelled_raw = status_is(cancelled, {200}, 'cancel compatible appointment')
+    cancelled_visit = appointment_response(json_body(cancelled_raw, 'cancel response'), 'cancel response')
+    require(cancelled_visit == {**cold_visit, 'status': 'Cancelled', 'version': cold_visit['version'] + 1},
+            'cancel response changed fields other than status and version')
     require(listing(status_is(get(owner), {200}, 'owner list'))[winner_id] == 1,
             'owner list must contain winner exactly once')
     print(f'winner={winner_id} vehicle={winner["vehicle"]}')
-    print('PASS health, auth, contention, owner visibility, carrier/tenant isolation, replay, mismatch, adjacent, compatibility')
+    print('PASS health, auth, contention, owner visibility, carrier/tenant isolation, replay, mismatch, adjacent, compatibility, cancellation and response contract')
 
 
 def main():

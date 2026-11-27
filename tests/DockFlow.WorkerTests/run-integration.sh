@@ -32,7 +32,7 @@ if ! $ready; then
   docker exec "$mq_id" sh -c 'nc -z -w 1 127.0.0.1 5672 && printf "AMQP reachable inside container\n"' >&2 || true
   exit 1
 fi
-python3 -c 'from pathlib import Path; print(Path("src/DockFlow.Infrastructure/InitialDockFlow.cs").read_text().split(chr(34)*3)[1])' |
+python3 -c 'from pathlib import Path; print(Path("src/DockFlow.Infrastructure/Migrations/InitialDockFlow.cs").read_text().split(chr(34)*3)[1])' |
   docker exec -i "$pg_id" psql -U postgres -v ON_ERROR_STOP=1 >/dev/null
 docker run --rm --network host -e DOTNET_CLI_TELEMETRY_OPTOUT=1 \
   -e TestDatabase="Host=127.0.0.1;Port=$pg_port;Database=postgres;Username=postgres;Password=$password" \
