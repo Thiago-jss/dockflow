@@ -1,0 +1,119 @@
+name: dockflow
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ['no-new-privileges:true']
+  init: true
+x-web-image: &web_image
+  image: dockflow-web:local
+  build: {context: ., target: web}
+x-db-runtime: &db_runtime 'Host=db;Port=5432;Database=dockflow;Username=dockflow;Password=${DOCKFLOW_DB_PASSWORD:?run scripts/bootstrap.py}'
+services:
+  db:
+    image: postgres:17-alpine@sha256:f9cf3e1f0066f0eb0c48707d864f0ac5941e9ff454a072077d97a4d278d07d73
+    environment:
+      POSTGRES_DB: dockflow
+      POSTGRES_USER: dockflow_admin
+      POSTGRES_PASSWORD: '${DOCKFLOW_DB_ADMIN_PASSWORD:?run scripts/bootstrap.py}'
+      DOCKFLOW_DB_PASSWORD: '${DOCKFLOW_DB_PASSWORD:?run scripts/bootstrap.py}'
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./ops/postgres/10-runtime.sh:/docker-entrypoint-initdb.d/10-runtime.sh:ro
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, dockflow_admin, -d, dockflow]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  broker:
+    image: rabbitmq:4.3-management-alpine@sha256:92d5e539a2f376b0c4ba13d03ec52c1e22a9df1a98be3739ccfb452ac83a4ede
+    hostname: broker
+    environment:
+      RABBITMQ_DEFAULT_USER: dockflow
+      RABBITMQ_DEFAULT_PASS: '${DOCKFLOW_MQ_PASSWORD:?run scripts/bootstrap.py}'
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes: ['mq-data:/var/lib/rabbitmq']
+    healthcheck:
+      test: [CMD, rabbitmq-diagnostics, -q, ping]
+      interval: 4s
+      timeout: 5s
+      retries: 20
+  redis:
+    image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
+    command: [redis-server, /lab/redis.conf, --save, '', --appendonly, 'no']
+    volumes:
+      - type: bind
+        source: ./.local/redis.conf
+        target: /lab/redis.conf
+        read_only: true
+        bind: {create_host_path: false}
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4@sha256:9409c59bdfb65dbffa20b11e6f18b8abb9281d480c7ca402f51ed3d5977e6007
+    command: [start-dev, --import-realm, '--hostname=http://localhost:5192', '--hostname-strict=true']
+    ports: ['127.0.0.1:5192:8080']
+    volumes:
+      - type: bind
+        source: ./.local/dockflow-realm.json
+        target: /opt/keycloak/data/import/dockflow-realm.json
+        read_only: true
+        bind: {create_host_path: false}
+  migrate:
+    <<: [*web_image, *hardened]
+    command: [--migrate]
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      ConnectionStrings__DockFlow: 'Host=db;Port=5432;Database=dockflow;Username=dockflow_admin;Password=${DOCKFLOW_DB_ADMIN_PASSWORD:?run scripts/bootstrap.py}'
+      DockFlow__SeedDemo: 'true'
+      Identity__Authority: 'http://localhost:5192/realms/dockflow'
+      Identity__InternalAuthority: 'http://keycloak:8080/realms/dockflow'
+      Identity__ClientId: dockflow-web
+      Identity__Audience: dockflow-api
+      Identity__ClientSecret: '${DOCKFLOW_WEB_SECRET:?run scripts/bootstrap.py}'
+      Identity__AllowHttp: 'true'
+  web:
+    <<: [*web_image, *hardened]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      keycloak: {condition: service_started}
+    environment:
+      ASPNETCORE_URLS: 'http://+:8080'
+      ASPNETCORE_ENVIRONMENT: Production
+      ConnectionStrings__DockFlow: *db_runtime
+      Identity__Authority: 'http://localhost:5192/realms/dockflow'
+      Identity__InternalAuthority: 'http://keycloak:8080/realms/dockflow'
+      Identity__ClientId: dockflow-web
+      Identity__Audience: dockflow-api
+      Identity__ClientSecret: '${DOCKFLOW_WEB_SECRET:?run scripts/bootstrap.py}'
+      Identity__AllowHttp: 'true'
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: 'true'
+      ConnectionStrings__Redis: 'redis:6379,password=${DOCKFLOW_REDIS_PASSWORD:?run scripts/bootstrap.py},connectTimeout=500,asyncTimeout=500,abortConnect=false'
+  worker:
+    <<: *hardened
+    image: dockflow-worker:local
+    build: {context: ., target: worker}
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      broker: {condition: service_started}
+    environment:
+      ConnectionStrings__DockFlow: *db_runtime
+      Messaging__Host: broker
+      Messaging__User: dockflow
+      Messaging__Password: '${DOCKFLOW_MQ_PASSWORD:?run scripts/bootstrap.py}'
+  gate:
+    image: caddy:2-alpine@sha256:eb4d35b7452d1ab6171fbdbe8d9275b2301dad6dad92115d91e19fb9b24d510f
+    depends_on: [web]
+    ports: ['127.0.0.1:5191:5191']
+    volumes:
+      - ./ops/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - type: bind
+        source: ./.local/tls.crt
+        target: /lab/tls.crt
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./.local/tls.key
+        target: /lab/tls.key
+        read_only: true
+        bind: {create_host_path: false}
+volumes:
+  db-data:
+  mq-data:
